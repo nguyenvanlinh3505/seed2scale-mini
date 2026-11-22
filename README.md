@@ -65,6 +65,42 @@ Run 2 changes / Thay đổi ở lần chạy 2:
 - each seed count writes to its own `runs_n<N>/`, `results_n<N>/` so runs never mix / mỗi số seed ghi vào
   thư mục riêng để các lần chạy không trộn lẫn.
 
+## Results: self-evolution did not improve the collector / Kết quả: tự tiến hóa không cải thiện collector
+
+**Negative result.** With 32 seeds (run 2) and four follow-up experiments, no setting made the SuperTiny collector's
+success rise across iterations beyond the noise (~±2 pp). Full details: [`auto-research/s2s-bootstrap/REPORT.md`](auto-research/s2s-bootstrap/REPORT.md).
+**Kết quả âm tính.** Với 32 seed và bốn thí nghiệm tiếp theo, không cấu hình nào làm success của collector tăng qua
+các vòng vượt mức nhiễu (~±2 điểm). Chi tiết ở báo cáo trên.
+
+| Experiment | Success % by iteration | \|D\| | Change, first → last two |
+|---|---|---|---|
+| Run 2, `s2s` (warm start, γ=7) | 7.0 7.0 4.3 2.7 3.1 3.9 1.2 1.6 | 32→42 | −5.5 pp |
+| Run 2, `gate_only` | 5.1 8.6 6.2 6.6 5.9 7.8 3.9 4.3 | 32→156 | −3.5 pp |
+| Run 2, `no_filter` | 3.5 0.8 0.8 1.2 0.8 0.4 0.4 0.4 | 32→2080 | collapse / sụp đổ |
+| E1 `s2s`, retrain from scratch, γ=7 | 5.5 5.9 9.8 0.0 5.9 5.5 | 34→38 | +0.2 pp |
+| E3 `s2s`, scratch, γ=6 | 5.5 10.2 6.2 0.0 0.0 6.2 | 42→81 | −2.3 pp |
+| E4 `gate_only`, scratch | 5.5 0.0 5.9 5.9 6.2 6.2 | 46→108 | +0.8 pp |
+
+What we learned / Điều rút ra:
+1. **No filter → collapse** (Q3): training on all rollouts drives success from 3.5% to 0.4%. Filtering is necessary.
+   **Không lọc → sụp đổ**: train trên mọi rollout kéo success từ 3,5% xuống 0,4%. Lọc là cần thiết.
+2. **The run-2 decline was over-training**, not the data: retraining from scratch removes it (H1, weak support).
+   **Sự suy giảm ở lần chạy 2 là do train quá mức**, không phải do dữ liệu: train lại từ đầu xóa được nó.
+3. **More data does not help**: γ=6 (E3) and gate-only (E4) grow the dataset 2–2.3×, success stays at ~6% (H2/H3
+   refuted). / **Thêm dữ liệu không giúp**: dữ liệu tăng 2–2,3 lần, success vẫn ~6%.
+4. **No measurable VLV benefit** (Q2): E3 vs E4 differ by 3 pp, inside the noise. The VLV scores are coarse (3/6/10).
+   **Không đo được lợi ích của VLV**: chênh lệch nằm trong nhiễu; VLV cho điểm thô (3/6/10).
+5. **Training variance dominates**: the same 46 trajectories gave 0.0% and 5.9% in two trainings.
+   **Phương sai khi train lấn át**: cùng 46 quỹ đạo cho 0,0% và 5,9% ở hai lần train.
+6. **Target model** (Q1): SmolVLA trained on the 32 seeds scores 0/100 in the source world and 0% in 3 unseen worlds,
+   so the scaling curve and Parallel-Worlds questions (Q1, Q4, Q5) remain open.
+   **Model mục tiêu**: SmolVLA train trên 32 seed đạt 0/100; các câu hỏi Q1, Q4, Q5 còn bỏ ngỏ.
+
+This does not refute the paper: it runs on real robots with an unpublished collector training recipe; here the
+mechanism fails on PushT under the recipe we could infer.
+Kết quả này không bác bỏ paper: paper chạy trên robot thật với cách train collector không công bố; ở đây cơ chế không
+hoạt động trên PushT với cách train mà ta suy ra được.
+
 ## Arms and target models / Các nhánh và model mục tiêu
 
 | Arm | Filter | Paper name |
@@ -92,7 +128,7 @@ Mỗi model được đánh giá trên 100 seed cố định ở thế giới g�
    Sau đó `evolve,worlds,targets,analyze`. Mọi giai đoạn chạy tiếp được và được sao lưu lên repo HF,
    nên sau giới hạn 12 giờ của molab chỉ cần bấm chạy lại.
 
-Locally / Trên máy: `pip install -e . && pytest -q` (16 CPU tests, no GPU / không cần GPU).
+Locally / Trên máy: `pip install -e . && pytest -q` (17 CPU tests, no GPU / không cần GPU).
 
 ## Layout / Cấu trúc
 
