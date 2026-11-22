@@ -1,0 +1,20 @@
+# Seed2Scale-mini: scaled-down, paper-faithful replication of Seed2Scale (arXiv:2603.08260) on PushT.
+# Seed2Scale-mini: bản tái hiện thu nhỏ, bám sát paper Seed2Scale (arXiv:2603.08260) trên PushT.
+[project]
+name = "seed2scale-mini"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "lerobot[pusht,smolvla]==0.7.0",  # pinned: APIs checked against this exact version / ghim: API đã kiểm tra với bản này
+    "matplotlib",
+    "requests",
+    "huggingface_hub",
+    "pytest",
+]
+
+[tool.setuptools]
+packages = ["s2s"]
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
