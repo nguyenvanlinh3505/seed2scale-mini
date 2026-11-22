@@ -1,0 +1,6 @@
+{
+  "objective": "Make Seed2Scale* (success gate + VLV) self-evolution raise SuperTiny collector success across iterations on PushT",
+  "metric": "late_gain_pp",
+  "direction": "max",
+  "created": "2026-11-22T15:30:10+07:00"
+}

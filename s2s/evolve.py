@@ -100,17 +100,30 @@ def main():
     p.add_argument("--vlv-url", default="http://127.0.0.1:8000/v1")
     p.add_argument("--n-seeds", type=int, default=CFG.n_seeds,
                    help="paper: 4; more if the collector cannot bootstrap / paper: 4; tăng nếu collector không khởi động được")
+    # Research options (auto-research/s2s-bootstrap); defaults reproduce runs 1-2.
+    # Tùy chọn nghiên cứu (auto-research/s2s-bootstrap); giá trị mặc định tái lập lần chạy 1-2.
+    p.add_argument("--train-mode", choices=["warm", "scratch"], default="warm",
+                   help="warm: continue from the previous collector (+collector_steps); scratch: new collector every "
+                        "iteration with a fixed epoch budget / warm: train tiếp; scratch: collector mới mỗi vòng")
+    p.add_argument("--epochs", type=float, default=64.0, help="scratch mode: epochs over D(i) / số epoch trên D(i)")
+    p.add_argument("--max-steps", type=int, default=20000, help="scratch mode: cap on steps / giới hạn số bước")
+    p.add_argument("--vlv-threshold", type=float, default=None, help="override gamma / ghi đè gamma")
+    p.add_argument("--noise", type=float, default=None, help="override exploration noise (px) / ghi đè nhiễu khám phá")
     args = p.parse_args()
 
     cfg = CFG
+    if args.vlv_threshold is not None:
+        cfg = replace(cfg, vlv_threshold=args.vlv_threshold)
+    if args.noise is not None:
+        cfg = replace(cfg, exploration_noise=args.noise)
     if args.tiny:
-        cfg = replace(CFG, collector_steps_first=20, collector_steps=10, max_steps=40, collector_batch=16)
+        cfg = replace(cfg, collector_steps_first=20, collector_steps=10, max_steps=40, collector_batch=16)
     gate, use_vlv = ARMS[args.arm]
     device = "cuda" if torch.cuda.is_available() else "cpu"
     out = Path(args.out) / args.arm
     out.mkdir(parents=True, exist_ok=True)
     log(f"arm={args.arm} gate={gate} vlv={use_vlv} device={device} iterations={args.iterations} "
-        f"rollouts={args.n_rollouts}")
+        f"rollouts={args.n_rollouts} train={args.train_mode} gamma={cfg.vlv_threshold} noise={cfg.exploration_noise}")
 
     seeds = load_seeds(Path(args.out) / "seeds.npz", args.n_seeds)
     data = list(seeds)
@@ -125,7 +138,7 @@ def main():
     while (out / f"iter_{start}" / "summary.json").exists():
         data += [load_traj(f) for f in sorted((out / f"iter_{start}" / "accepted").glob("*.npz"))]
         start += 1
-    if start > 0:
+    if start > 0 and args.train_mode == "warm":
         model.load_state_dict(torch.load(out / f"iter_{start - 1}" / "collector.pt", map_location="cpu"),
                               strict=False)
         log(f"resuming at iteration {start} with |D|={len(data)} trajectories")
@@ -142,7 +155,18 @@ def main():
         t0 = time.time()
         d = out / f"iter_{i}"
         (d / "accepted").mkdir(parents=True, exist_ok=True)
-        steps = cfg.collector_steps_first if i == 0 else cfg.collector_steps
+        if args.train_mode == "scratch":
+            # New collector from the same initial weights; steps sized to `epochs` passes over D(i).
+            # Collector mới từ cùng trọng số khởi tạo; số bước bằng `epochs` lượt qua D(i).
+            torch.manual_seed(cfg.seed)
+            model = SuperTiny(cfg.chunk_size, cfg.d_model, cfg.n_decoder_layers, task=TASK)
+            frames = sum(len(t["actions"]) for t in data)
+            steps = int(min(args.max_steps, max(cfg.collector_steps_first,
+                                                args.epochs * frames / cfg.collector_batch)))
+            if args.tiny:
+                steps = cfg.collector_steps_first  # smoke test only / chỉ cho chạy thử
+        else:
+            steps = cfg.collector_steps_first if i == 0 else cfg.collector_steps
         log(f"iteration {i}: training collector on |D({i})|={len(data)} trajectories for {steps} steps")
         torch.manual_seed(cfg.seed * 1000 + i)  # same shuffling/augmentation stream per iteration across arms
         losses = train_collector(model, data, steps, cfg.collector_lr, cfg.collector_batch, device, log=log)
@@ -164,7 +188,8 @@ def main():
                     "gate_pass": t["gate_pass"], "vlv_score": t["vlv_score"], "vlv_text": t["vlv_text"],
                     "accepted": t["accepted"], **smoothness(t["actions"])}, ensure_ascii=False) + "\n")
         data += accepted
-        summary = {"iteration": i, "arm": args.arm, "n_seeds": args.n_seeds, "collector_success_rate": float(np.mean([t["success"] for t in trajs])),
+        summary = {"iteration": i, "arm": args.arm, "n_seeds": args.n_seeds, "train_mode": args.train_mode,
+                   "gamma": cfg.vlv_threshold, "noise": cfg.exploration_noise, "collector_steps": steps, "collector_success_rate": float(np.mean([t["success"] for t in trajs])),
                    "n_rollouts": len(trajs), "n_success": int(sum(t["success"] for t in trajs)),
                    "n_accepted": len(accepted), "dataset_trajs_after": len(data),
                    "final_collector_loss": losses[-1] if losses else None, "seconds": round(time.time() - t0)}

@@ -93,7 +93,7 @@ def _(CODE, install, mo, repo_url, sh):
     mo.stop(not install.value, mo.md("_Install not run yet._"))
     out = sh(f"command -v uv || pip install -q uv; nvidia-smi --query-gpu=name,memory.total --format=csv")
     out += sh(f"if [ -d {CODE}/.git ]; then git -C {CODE} pull; else git clone {repo_url.value} {CODE}; fi")
-    out += sh(f"cd {CODE} && uv venv -q --python 3.12 .venv && uv pip install -q --python .venv/bin/python -e . "
+    out += sh(f"cd {CODE} && uv venv -q --allow-existing --python 3.12 .venv && uv pip install -q --python .venv/bin/python -e . "
               f"&& .venv/bin/python -m pytest -q 2>&1 | tail -3")
     mo.md(f"```\n{out}\n```")
     return

@@ -134,3 +134,11 @@ def test_pick_n_seeds_and_layout(tmp_path):
     (tmp_path / "state" / "calibrate.done").write_text(json.dumps({"4": 0.0, "8": 0.01, "16": 0.05, "32": 0.2}))
     assert pick_n_seeds(w, 0.03) == 16
     assert layout(4) == ("runs", "") and layout(16) == ("runs_n16", "_n16")
+
+
+def test_research_registry_and_metric():
+    from s2s.experiments import EXPERIMENTS, evolve_args, late_gain_pp
+    assert abs(late_gain_pp([0.06, 0.05, 0.10, 0.12]) - 5.0) < 1e-9
+    a = evolve_args(EXPERIMENTS["E3"])
+    assert a[a.index("--train-mode") + 1] == "scratch" and a[a.index("--vlv-threshold") + 1] == "6"
+    assert all(c["arm"] in ("s2s", "gate_only") for c in EXPERIMENTS.values())

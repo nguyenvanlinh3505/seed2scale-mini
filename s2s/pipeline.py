@@ -208,6 +208,41 @@ def stage_calibrate(w: Work, counts: list[int], n_rollouts: int):
     w.mark("calibrate", {str(k): v["collector_success_rate"] for k, v in rows.items()})
 
 
+def stage_research(w: Work, vllm_python: Path, gpu_mem: float, ids: list[str]):
+    """Run registered experiments (s2s/experiments.py) one after another, sharing one VLV server.
+    Chạy lần lượt các thí nghiệm đã đăng ký (s2s/experiments.py), dùng chung một server VLV."""
+    import shutil
+    from contextlib import nullcontext
+
+    from s2s.experiments import EXPERIMENTS, N_SEEDS, evolve_args, late_gain_pp
+    todo = [i for i in ids if not w.done(f"research_{i}")]
+    if not todo:
+        return
+    needs_vlv = any(EXPERIMENTS[i]["arm"] == "s2s" for i in todo)
+    with (VLVServer(w, vllm_python, gpu_mem) if needs_vlv else nullcontext()):
+        for eid in todo:
+            cfg, out = EXPERIMENTS[eid], w.root / "research" / eid
+            out.mkdir(parents=True, exist_ok=True)
+            cached = w.root / layout(N_SEEDS)[0] / "seeds.npz"  # reuse the same 32 seeds / dùng lại 32 seed
+            if cached.exists() and not (out / "seeds.npz").exists():
+                shutil.copy(cached, out / "seeds.npz")
+            log(f"research {eid}: {cfg}")
+            if run([PY, "-m", "s2s.evolve", "--out", str(out), *evolve_args(cfg)],
+                   w.root / "logs" / f"research_{eid}.log") != 0:
+                raise SystemExit(f"research {eid} failed")
+            its = sorted((out / cfg["arm"]).glob("iter_*/summary.json"), key=lambda p: int(p.parent.name[5:]))
+            rows = [json.loads(p.read_text(encoding="utf-8")) for p in its]
+            rates = [r["collector_success_rate"] for r in rows]
+            res = {"id": eid, "config": cfg, "success_by_iter": rates, "late_gain_pp": late_gain_pp(rates),
+                   "dataset_trajs": [r["dataset_trajs_after"] for r in rows],
+                   "accepted": [r["n_accepted"] for r in rows]}
+            (w.root / "results").mkdir(exist_ok=True)
+            (w.root / "results" / f"research_{eid}.json").write_text(json.dumps(res, indent=2), encoding="utf-8")
+            log(f"RESEARCH {eid} success%=" + " ".join(f"{100 * r:.1f}" for r in rates)
+                + f" late_gain={res['late_gain_pp']:+.1f}pp |D|={res['dataset_trajs']}")
+            w.mark(f"research_{eid}", res)
+
+
 def layout(n_seeds: int) -> tuple[str, str]:
     """(runs dir name, stage/result suffix). 4 seeds keeps the original names, so run 1 stays readable;
     any other count gets its own folders and markers, so runs never mix (also on the Hub).
@@ -310,6 +345,9 @@ def main():
         stage_smoke(w, vllm_python, a.vlv_gpu_mem)
     if "calibrate" in stages:
         stage_calibrate(w, [int(x) for x in a.calib_seeds.split(",")], a.n_rollouts)
+    for st in stages:  # e.g. "research=E1+E3+E4"
+        if st.startswith("research="):
+            stage_research(w, vllm_python, a.vlv_gpu_mem, st.split("=", 1)[1].split("+"))
     main_stages = {"evolve", "worlds", "targets", "analyze"} & set(stages)
     n_seeds = a.n_seeds
     if main_stages and n_seeds is None:

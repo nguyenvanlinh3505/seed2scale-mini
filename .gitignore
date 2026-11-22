@@ -8,3 +8,4 @@ datasets/
 targets/
 outputs/
 *.pdf
+auto-research/**/runs/
