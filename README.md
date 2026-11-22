@@ -101,6 +101,35 @@ mechanism fails on PushT under the recipe we could infer.
 Kết quả này không bác bỏ paper: paper chạy trên robot thật với cách train collector không công bố; ở đây cơ chế không
 hoạt động trên PushT với cách train mà ta suy ra được.
 
+## Open question: does Seed2Scale suit PushT-like tasks? / Câu hỏi mở: Seed2Scale có thật sự phù hợp với bài toán kiểu PushT?
+
+**What PushT is.** A 2-D, contact-rich pushing task (popularised by Diffusion Policy, Chi et al. 2023): a round
+pusher must push a T-shaped block until it overlaps a fixed target pose by ≥ 95%. It needs long, precise pushing
+sequences, and its demonstrations are **multimodal** (pushing from the left or from the right can both be correct).
+**PushT là gì.** Bài toán đẩy 2D giàu tiếp xúc: một đầu đẩy tròn phải đẩy khối chữ T đến khi trùng ≥ 95% với vị trí
+mục tiêu. Cần chuỗi đẩy dài và chính xác, và dữ liệu mẫu **đa mode** (đẩy từ trái hay từ phải đều có thể đúng).
+
+**The question.** Seed2Scale assumes that the collector's own successes are *new and diverse* data. Our results
+suggest this may fail when (a) success is rare and mostly luck under a strict threshold, (b) actions are multimodal
+but the collector is a deterministic regressor (SuperTiny, L1 loss), and (c) successes come from states the
+collector already handles, so failure states never receive corrective labels (the problem DAgger addresses).
+Is self-evolution with success/VLV filtering suitable for such contact-rich, high-precision, multimodal tasks,
+or does it only work for coarse pick-and-place tasks like those in the paper?
+**Câu hỏi.** Seed2Scale giả định rằng các lần thành công của collector là dữ liệu *mới và đa dạng*. Kết quả ở đây cho
+thấy giả định này có thể sai khi (a) thành công hiếm và chủ yếu do may dưới ngưỡng khắt khe, (b) hành động đa mode
+nhưng collector là bộ hồi quy tất định (SuperTiny, loss L1), và (c) thành công đến từ các trạng thái collector vốn đã
+xử lý được, nên trạng thái thất bại không bao giờ nhận được nhãn sửa lỗi (vấn đề mà DAgger giải quyết).
+Vòng tự tiến hóa có lọc bằng thành công/VLV có phù hợp với các bài giàu tiếp xúc, cần độ chính xác cao và đa mode như
+vậy không, hay chỉ hoạt động với các bài gắp–đặt thô như trong paper?
+
+**Untested ways to answer it / Cách trả lời (chưa thực hiện):**
+1. Plot the start states of accepted trajectories vs all rollouts: do accepted data cluster in easy regions?
+   Vẽ vị trí xuất phát của quỹ đạo được nhận so với toàn bộ rollout: dữ liệu có dồn vào vùng dễ không?
+2. Replace the L1 head with a multimodal one (diffusion or discretised actions) and rerun E4.
+   Thay đầu ra L1 bằng đầu ra đa mode (diffusion hoặc rời rạc hóa hành động) rồi chạy lại E4.
+3. Repeat on a coarse pick-and-place task (e.g. a LIBERO or gym-aloha task) with the same pipeline.
+   Lặp lại trên một bài gắp–đặt thô (ví dụ LIBERO hoặc gym-aloha) với cùng pipeline.
+
 ## Arms and target models / Các nhánh và model mục tiêu
 
 | Arm | Filter | Paper name |
