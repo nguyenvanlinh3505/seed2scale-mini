@@ -140,11 +140,14 @@ def plots(coll: dict, res: dict, out: Path):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--work", default="work")
+    p.add_argument("--runs-name", default="runs")
+    p.add_argument("--results-name", default="results")
     a = p.parse_args()
     work = Path(a.work)
-    out = work / "results"
+    runs = work / a.runs_name
+    out = work / a.results_name
     out.mkdir(parents=True, exist_ok=True)
-    coll = collector_table(work / "runs")
+    coll = collector_table(runs)
     res = target_results(out)
     plots(coll, res, out)
     md = ["# Seed2Scale-mini results / Kết quả", "", "## Collector per iteration / Collector theo vòng", ""]
@@ -152,8 +155,8 @@ def main():
         md.append(f"- {ARM_LABELS[arm]}: success " + ", ".join(f"{r['collector_success_rate']:.2f}" for r in rows)
                   + f"; |D| after last iteration = {rows[-1]['dataset_trajs_after']}")
     md += ["", "## Target models (SmolVLA) / Model mục tiêu", "", targets_md(res),
-           "## What the VLV rewards / VLV thưởng cho điều gì", "", vlv_table(work / "runs")]
-    pw = work / "runs" / "s2s" / "parallel_worlds" / "summary.json"
+           "## What the VLV rewards / VLV thưởng cho điều gì", "", vlv_table(runs)]
+    pw = runs / "s2s" / "parallel_worlds" / "summary.json"
     if pw.exists():
         md += ["## Parallel Worlds", "", "```", pw.read_text(encoding="utf-8"), "```"]
     (out / "summary.md").write_text("\n".join(md), encoding="utf-8")

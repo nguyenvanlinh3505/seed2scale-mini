@@ -15,6 +15,11 @@ FPS = 10                                                     # lerobot/pusht fps
 class Config:
     # --- Seeds / Dữ liệu seed ---
     n_seeds: int = 4                 # PAPER: four seed demos at the four workspace corners / 4 demo ở 4 góc
+                                     # Run 1 showed PushT cannot bootstrap from 4 (0-1 successes in 2,048 rollouts);
+                                     # the calibrate stage picks the smallest count that does (s2s/pipeline.py).
+                                     # Lần chạy 1 cho thấy PushT không khởi động được từ 4 seed (0-1 thành công
+                                     # trên 2.048 rollout); giai đoạn calibrate chọn số seed nhỏ nhất khởi động được.
+    seed: int = 0                    # random seed for model init and training / seed ngẫu nhiên
     seed_dataset: str = "lerobot/pusht"
 
     # --- SuperTiny collector / Bộ thu thập SuperTiny ---
@@ -23,8 +28,9 @@ class Config:
     d_model: int = 256               # DEVIATION: decoder width not reported; with ResNet-18 + T5-small encoder
     n_decoder_layers: int = 4        # the total is ~48M params like the paper / tổng ~48M tham số như paper
     collector_lr: float = 3e-4
-    collector_steps_first: int = 8000  # iteration 0 trains from scratch / vòng 0 train từ đầu
-    collector_steps: int = 3000        # later iterations warm-start from the previous collector
+    collector_steps_first: int = 4000  # iteration 0 from scratch; 8000 memorised 4 demos (loss 0.005) in run 1
+                                       # vòng 0 train từ đầu; 8000 bước đã học thuộc 4 demo (loss 0,005) ở lần chạy 1
+    collector_steps: int = 2000        # later iterations warm-start from the previous collector
                                        # các vòng sau tiếp tục từ collector vòng trước
     collector_batch: int = 64
 

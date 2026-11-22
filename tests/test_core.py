@@ -111,3 +111,26 @@ def test_smoothness_metrics_rank_jitter_higher():
     jittery = smooth + np.random.default_rng(0).normal(0, 10, smooth.shape)
     s, j = smoothness(smooth), smoothness(jittery)
     assert j["tv"] > s["tv"] and j["jerk"] > s["jerk"] and j["hf_ratio"] > s["hf_ratio"]
+
+
+# ---------- run-2 fixes: more seeds, auto seed count / sửa lỗi lần chạy 2 ----------
+def test_extra_seeds_spread_out_after_corners():
+    rng = np.random.default_rng(0)
+    frames = {}
+    pts = list(CORNERS_96) + [(48, 48), (49, 49), (20, 50)] + [tuple(x) for x in rng.uniform(15, 80, (10, 2))]
+    for ep, (cx, cy) in enumerate(pts):
+        img = np.full((96, 96, 3), 255, np.uint8)
+        img[int(cy) - 3:int(cy) + 3, int(cx) - 3:int(cx) + 3] = (119, 136, 153)
+        frames[ep] = img
+    chosen = pick_corner_episodes(frames, 6)
+    assert chosen[:4] == [0, 1, 2, 3] and len(set(chosen)) == 6
+    assert not ({4, 5} <= set(chosen))  # two near-duplicates are never both picked / không lấy cả hai điểm gần trùng
+
+
+def test_pick_n_seeds_and_layout(tmp_path):
+    import json
+    from s2s.pipeline import Work, layout, pick_n_seeds
+    w = Work(tmp_path, None)
+    (tmp_path / "state" / "calibrate.done").write_text(json.dumps({"4": 0.0, "8": 0.01, "16": 0.05, "32": 0.2}))
+    assert pick_n_seeds(w, 0.03) == 16
+    assert layout(4) == ("runs", "") and layout(16) == ("runs_n16", "_n16")

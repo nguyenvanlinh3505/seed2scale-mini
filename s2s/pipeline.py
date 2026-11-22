@@ -5,6 +5,8 @@ Stages (each leaves a marker in <work>/state; rerunning skips finished work):
 Các giai đoạn (mỗi giai đoạn để lại dấu ở <work>/state; chạy lại sẽ bỏ qua phần đã xong):
   setup      separate virtualenv with vLLM (vLLM and LeRobot pin different torch versions)
   smoke      tiny end-to-end run + VLV health check + SmolVLA speed calibration
+  calibrate  iteration-0 collector success for several seed counts (run 1: 4 seeds never bootstrapped)
+             success của collector ở vòng 0 với nhiều số seed (lần chạy 1: 4 seed không khởi động được)
   evolve     self-evolution for arms s2s (with VLV server), gate_only, no_filter
   worlds     Parallel Worlds projection of the s2s arm (with VLV server)
   targets    export -> train SmolVLA -> evaluate, in priority order (TARGETS)
@@ -33,7 +35,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
 
 PY = sys.executable
-STAGES = ["setup", "smoke", "evolve", "worlds", "targets", "analyze"]
+STAGES = ["setup", "smoke", "calibrate", "evolve", "worlds", "targets", "analyze"]
 # (name, arm, iteration, with parallel worlds), most important first.
 # (tên, nhánh, vòng, có parallel worlds), quan trọng nhất trước.
 TARGETS = [
@@ -93,21 +95,20 @@ class Work:
         api.create_repo(self.hf_repo, repo_type="dataset", private=True, exist_ok=True)
         api.upload_folder(repo_id=self.hf_repo, repo_type="dataset", folder_path=str(self.root),
                           commit_message=f"stage {label}",
-                          allow_patterns=["state/*", "logs/*", "runs/**", "results/**",
-                                          "targets/*/checkpoints/last/pretrained_model/*"],
+                          allow_patterns=["state/*", "logs/*", "runs/**", "runs_*/**", "calib/**", "results/**",
+                                          "results_*/**", "targets/*/checkpoints/last/pretrained_model/*"],
                           ignore_patterns=["**/.cache/**"])
         log(f"pushed results to hf://{self.hf_repo} ({label})")
 
     def pull(self):
         if not (self.hf_repo and self.token):
             return
-        from huggingface_hub import snapshot_download
-        from huggingface_hub.utils import RepositoryNotFoundError
-        try:
-            snapshot_download(self.hf_repo, repo_type="dataset", local_dir=str(self.root), token=self.token)
-            log(f"restored previous progress from hf://{self.hf_repo}")
-        except RepositoryNotFoundError:
-            log("no previous progress on the Hub; starting fresh")
+        from huggingface_hub import HfApi, snapshot_download
+        if not HfApi(token=self.token).repo_exists(self.hf_repo, repo_type="dataset"):
+            log(f"hf://{self.hf_repo} does not exist yet; starting fresh / chưa có, bắt đầu mới")
+            return
+        snapshot_download(self.hf_repo, repo_type="dataset", local_dir=str(self.root), token=self.token)
+        log(f"restored previous progress from hf://{self.hf_repo}")
 
 
 class VLVServer:
@@ -189,44 +190,85 @@ def stage_smoke(w: Work, vllm_python: Path, gpu_mem: float):
     w.mark("smoke", {"smolvla_sec_per_step_upper_bound": sec_per_step})
 
 
-def stage_evolve(w: Work, vllm_python: Path, gpu_mem: float, n_rollouts: int):
-    runs = str(w.root / "runs")
-    if not w.done("evolve_s2s"):
+def stage_calibrate(w: Work, counts: list[int], n_rollouts: int):
+    """Iteration 0 only, gate_only arm, for each seed count; reports collector success.
+    Chỉ vòng 0, nhánh gate_only, với mỗi số seed; báo cáo success của collector."""
+    rows = {}
+    for n in counts:
+        out = w.root / "calib" / f"n{n}"
+        if not (out / "gate_only" / "iter_0" / "summary.json").exists():
+            if run([PY, "-m", "s2s.evolve", "--arm", "gate_only", "--out", str(out), "--iterations", "1",
+                    "--n-seeds", str(n), "--n-rollouts", str(n_rollouts)], w.root / "logs" / "calibrate.log") != 0:
+                raise SystemExit(f"calibration with {n} seeds failed")
+        rows[n] = json.loads((out / "gate_only" / "iter_0" / "summary.json").read_text(encoding="utf-8"))
+        log(f"calibration: {n} seeds -> collector success {rows[n]['collector_success_rate']:.3f} "
+            f"({rows[n]['n_success']}/{rows[n]['n_rollouts']})")
+    (w.root / "results").mkdir(exist_ok=True)
+    (w.root / "results" / "calibration.json").write_text(json.dumps(rows, indent=2), encoding="utf-8")
+    w.mark("calibrate", {str(k): v["collector_success_rate"] for k, v in rows.items()})
+
+
+def layout(n_seeds: int) -> tuple[str, str]:
+    """(runs dir name, stage/result suffix). 4 seeds keeps the original names, so run 1 stays readable;
+    any other count gets its own folders and markers, so runs never mix (also on the Hub).
+    (tên thư mục runs, hậu tố). 4 seed giữ tên gốc để lần chạy 1 vẫn đọc được; số seed khác có thư mục
+    và dấu riêng, nên các lần chạy không bao giờ trộn lẫn (kể cả trên Hub)."""
+    return ("runs", "") if n_seeds == 4 else (f"runs_n{n_seeds}", f"_n{n_seeds}")
+
+
+def pick_n_seeds(w: Work, min_success: float) -> int:
+    """Smallest calibrated seed count whose iteration-0 collector reaches `min_success`.
+    Số seed nhỏ nhất đã calibrate mà collector vòng 0 đạt `min_success`."""
+    info = json.loads((w.root / "state" / "calibrate.done").read_text(encoding="utf-8"))
+    ok = sorted(int(k) for k, v in info.items() if v >= min_success)
+    if not ok:
+        raise SystemExit(f"no calibrated seed count reaches success {min_success}: {info}")
+    log(f"calibration {info} -> using {ok[0]} seeds (smallest with success >= {min_success})")
+    return ok[0]
+
+
+def stage_evolve(w: Work, vllm_python: Path, gpu_mem: float, n_rollouts: int, n_seeds: int):
+    runs_name, sfx = layout(n_seeds)
+    runs = str(w.root / runs_name)
+    if not w.done(f"evolve_s2s{sfx}"):
         with VLVServer(w, vllm_python, gpu_mem):
-            if run([PY, "-m", "s2s.evolve", "--arm", "s2s", "--out", runs, "--n-rollouts", str(n_rollouts)],
-                   w.root / "logs" / "evolve_s2s.log") != 0:
+            if run([PY, "-m", "s2s.evolve", "--arm", "s2s", "--out", runs, "--n-rollouts", str(n_rollouts),
+                    "--n-seeds", str(n_seeds)], w.root / "logs" / f"evolve_s2s{sfx}.log") != 0:
                 raise SystemExit("evolve s2s failed")
-            w.mark("evolve_s2s")
-            if not w.done("worlds"):  # reuse the running server / dùng lại server đang chạy
+            w.mark(f"evolve_s2s{sfx}")
+            if not w.done(f"worlds{sfx}"):  # reuse the running server / dùng lại server đang chạy
                 if run([PY, "-m", "s2s.parallel_worlds", "--runs", runs, "--arm", "s2s"],
-                       w.root / "logs" / "worlds.log") != 0:
+                       w.root / "logs" / f"worlds{sfx}.log") != 0:
                     raise SystemExit("parallel worlds failed")
-                w.mark("worlds")
+                w.mark(f"worlds{sfx}")
     for arm in ("gate_only", "no_filter"):
-        if not w.done(f"evolve_{arm}"):
-            if run([PY, "-m", "s2s.evolve", "--arm", arm, "--out", runs, "--n-rollouts", str(n_rollouts)],
-                   w.root / "logs" / f"evolve_{arm}.log") != 0:
+        if not w.done(f"evolve_{arm}{sfx}"):
+            if run([PY, "-m", "s2s.evolve", "--arm", arm, "--out", runs, "--n-rollouts", str(n_rollouts),
+                    "--n-seeds", str(n_seeds)], w.root / "logs" / f"evolve_{arm}{sfx}.log") != 0:
                 raise SystemExit(f"evolve {arm} failed")
-            w.mark(f"evolve_{arm}")
+            w.mark(f"evolve_{arm}{sfx}")
 
 
-def stage_worlds(w: Work, vllm_python: Path, gpu_mem: float):
-    if w.done("worlds"):
+def stage_worlds(w: Work, vllm_python: Path, gpu_mem: float, n_seeds: int):
+    runs_name, sfx = layout(n_seeds)
+    if w.done(f"worlds{sfx}"):
         return
     with VLVServer(w, vllm_python, gpu_mem):
-        if run([PY, "-m", "s2s.parallel_worlds", "--runs", str(w.root / "runs"), "--arm", "s2s"],
-               w.root / "logs" / "worlds.log") != 0:
+        if run([PY, "-m", "s2s.parallel_worlds", "--runs", str(w.root / runs_name), "--arm", "s2s"],
+               w.root / "logs" / f"worlds{sfx}.log") != 0:
             raise SystemExit("parallel worlds failed")
-    w.mark("worlds")
+    w.mark(f"worlds{sfx}")
 
 
-def stage_targets(w: Work, steps: int, only: list[str] | None):
+def stage_targets(w: Work, steps: int, only: list[str] | None, n_seeds: int):
+    runs_name, sfx = layout(n_seeds)
+    results = w.root / f"results{sfx}"
     for name, arm, it, worlds in TARGETS:
-        if (only and name not in only) or w.done(f"target_{name}"):
+        if (only and name not in only) or w.done(f"target_{name}{sfx}"):
             continue
-        L = w.root / "logs" / f"target_{name}.log"
-        ds, out = w.root / "datasets" / name, w.root / "targets" / name
-        cmd = [PY, "-m", "s2s.export", "--runs", str(w.root / "runs"), "--arm", arm, "--iteration", str(it),
+        L = w.root / "logs" / f"target_{name}{sfx}.log"
+        ds, out = w.root / "datasets" / f"{name}{sfx}", w.root / "targets" / f"{name}{sfx}"
+        cmd = [PY, "-m", "s2s.export", "--runs", str(w.root / runs_name), "--arm", arm, "--iteration", str(it),
                "--dst", str(ds)] + (["--with-worlds"] if worlds else [])
         if run(cmd, L) != 0:
             log(f"skip {name}: export failed (stage not finished?)")
@@ -236,9 +278,9 @@ def stage_targets(w: Work, steps: int, only: list[str] | None):
                 raise SystemExit(f"training {name} failed")
         ckpt = out / "checkpoints" / "last" / "pretrained_model"
         if run([PY, "-m", "s2s.eval_target", "--ckpt", str(ckpt), "--worlds", *EVAL_WORLDS,
-                "--out", str(w.root / "results" / f"eval_{name}.json")], L) != 0:
+                "--out", str(results / f"eval_{name}.json")], L) != 0:
             raise SystemExit(f"eval {name} failed")
-        w.mark(f"target_{name}")
+        w.mark(f"target_{name}{sfx}")
 
 
 def main():
@@ -250,6 +292,12 @@ def main():
     p.add_argument("--target-steps", type=int, default=CFG.target_steps)
     p.add_argument("--n-rollouts", type=int, default=CFG.n_rollouts)
     p.add_argument("--vlv-gpu-mem", type=float, default=0.75)
+    p.add_argument("--n-seeds", type=int, default=None,
+                   help="seed count; default: smallest calibrated count reaching --min-success "
+                        "/ số seed; mặc định: số nhỏ nhất đã calibrate đạt --min-success")
+    p.add_argument("--calib-seeds", default="4,8,16,32", help="seed counts tried by the calibrate stage")
+    p.add_argument("--min-success", type=float, default=0.03,
+                   help="iteration-0 collector success needed to bootstrap (paper: early success < 15%%, non-zero)")
     a = p.parse_args()
     w = Work(Path(a.work).resolve(), a.hf_repo)
     w.pull()
@@ -260,15 +308,23 @@ def main():
         stage_setup(w, vllm_python)
     if "smoke" in stages:
         stage_smoke(w, vllm_python, a.vlv_gpu_mem)
+    if "calibrate" in stages:
+        stage_calibrate(w, [int(x) for x in a.calib_seeds.split(",")], a.n_rollouts)
+    main_stages = {"evolve", "worlds", "targets", "analyze"} & set(stages)
+    n_seeds = a.n_seeds
+    if main_stages and n_seeds is None:
+        n_seeds = pick_n_seeds(w, a.min_success) if w.done("calibrate") else CFG.n_seeds
     if "evolve" in stages:
-        stage_evolve(w, vllm_python, a.vlv_gpu_mem, a.n_rollouts)
+        stage_evolve(w, vllm_python, a.vlv_gpu_mem, a.n_rollouts, n_seeds)
     if "worlds" in stages:
-        stage_worlds(w, vllm_python, a.vlv_gpu_mem)
+        stage_worlds(w, vllm_python, a.vlv_gpu_mem, n_seeds)
     if "targets" in stages:
-        stage_targets(w, a.target_steps, a.targets.split(",") if a.targets else None)
+        stage_targets(w, a.target_steps, a.targets.split(",") if a.targets else None, n_seeds)
     if "analyze" in stages:
-        run([PY, "-m", "s2s.analyze", "--work", str(w.root)], w.root / "logs" / "analyze.log")
-        w.push("analyze")
+        runs_name, sfx = layout(n_seeds)
+        run([PY, "-m", "s2s.analyze", "--work", str(w.root), "--runs-name", runs_name,
+             "--results-name", f"results{sfx}"], w.root / "logs" / f"analyze{sfx}.log")
+        w.push(f"analyze{sfx}")
     log(f"pipeline finished requested stages in {(time.time() - t0) / 3600:.2f} h")
 
 

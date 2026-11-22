@@ -38,6 +38,31 @@ initialises the whole VLM *and* keeps it frozen; LeRobot warns this is "unlikely
 Vì sao "from scratch" = backbone pretrained: trong LeRobot 0.7.0, `load_vlm_weights=false` khởi tạo ngẫu
 nhiên toàn bộ VLM *và* đóng băng nó; chính LeRobot cảnh báo cách này "unlikely to yield good results".
 
+## Run 1 finding: 4 seeds do not bootstrap on PushT / Phát hiện lần chạy 1: 4 seed không khởi động được trên PushT
+
+With the paper's 4 corner seeds, 8 iterations × 256 rollouts gave **0/2,048 successes** for Seed2Scale*
+and **1/2,048** for SuperTiny⁻ (best coverage 0.81 and 0.96; mean 0.06–0.17). The collector memorised the
+demos (training loss 0.005) and the self-evolution loop never started, so the VLV was never even called.
+Self-evolution needs a collector with small but **non-zero** early success (the paper reports < 15%); on
+PushT, 4 demos do not provide it. Run 1 also exposed a bug: model initialisation was not seeded, so arms
+differed by luck (mean coverage 0.08 vs 0.16 at iteration 0 on identical data). Both arms are kept in
+`runs/` (and on the Hub) as a negative result.
+Với 4 seed ở 4 góc như paper, 8 vòng × 256 rollout cho **0/2.048 thành công** ở Seed2Scale* và **1/2.048**
+ở SuperTiny⁻ (độ phủ cao nhất 0,81 và 0,96; trung bình 0,06–0,17). Collector học thuộc các demo (loss 0,005)
+và vòng tự tiến hóa không bao giờ khởi động, nên VLV chưa từng được gọi. Tự tiến hóa cần collector có
+success ban đầu nhỏ nhưng **khác 0** (paper báo < 15%); trên PushT, 4 demo không đủ. Lần chạy 1 cũng lộ ra
+một lỗi: khởi tạo model không cố định seed, nên các nhánh khác nhau do may rủi (độ phủ trung bình 0,08 so
+với 0,16 ở vòng 0 trên cùng dữ liệu). Cả hai nhánh được giữ trong `runs/` (và trên Hub) làm kết quả âm tính.
+
+Run 2 changes / Thay đổi ở lần chạy 2:
+- fixed random seeds for model init and training / cố định seed ngẫu nhiên khi khởi tạo và train;
+- a `calibrate` stage measures iteration-0 collector success with 4, 8, 16, 32 seeds and the pipeline uses
+  the smallest count reaching 3% (corners first, then farthest-point spread) / giai đoạn `calibrate` đo
+  success vòng 0 với 4, 8, 16, 32 seed và pipeline dùng số nhỏ nhất đạt 3% (góc trước, rồi trải đều);
+- fewer collector steps (4000 / 2000) to reduce memorisation / ít bước train collector hơn để giảm học thuộc;
+- each seed count writes to its own `runs_n<N>/`, `results_n<N>/` so runs never mix / mỗi số seed ghi vào
+  thư mục riêng để các lần chạy không trộn lẫn.
+
 ## Arms and target models / Các nhánh và model mục tiêu
 
 | Arm | Filter | Paper name |
@@ -65,7 +90,7 @@ Mỗi model được đánh giá trên 100 seed cố định ở thế giới g�
    Sau đó `evolve,worlds,targets,analyze`. Mọi giai đoạn chạy tiếp được và được sao lưu lên repo HF,
    nên sau giới hạn 12 giờ của molab chỉ cần bấm chạy lại.
 
-Locally / Trên máy: `pip install -e . && pytest -q` (14 CPU tests, no GPU / không cần GPU).
+Locally / Trên máy: `pip install -e . && pytest -q` (16 CPU tests, no GPU / không cần GPU).
 
 ## Layout / Cấu trúc
 

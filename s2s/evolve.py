@@ -53,19 +53,23 @@ def load_traj(path: Path) -> dict:
     return t
 
 
-def load_seeds(cache: Path) -> list[dict]:
+def load_seeds(cache: Path, n: int | None = None) -> list[dict]:
     """Seed episodes as trajectories (cached). Seeds come from the dataset, so they have no replayable
     init_state (NaN) and are never projected into other worlds.
     Các episode seed ở dạng quỹ đạo (có cache). Seed lấy từ dataset nên không có init_state chạy lại
     được (NaN) và không được chiếu sang thế giới khác."""
     if cache.exists():
-        z = np.load(cache, allow_pickle=True)
-        return list(z["seeds"])
+        seeds = list(np.load(cache, allow_pickle=True)["seeds"])
+        if n is not None and len(seeds) != n:
+            raise SystemExit(f"{cache} holds {len(seeds)} seeds but {n} were requested; use a new --out "
+                             f"/ {cache} có {len(seeds)} seed nhưng yêu cầu {n}; hãy dùng --out mới")
+        return seeds
     from s2s.seeds import load_seed_episodes
+    n = CFG.n_seeds if n is None else n
     seeds = [{"init_state": np.full(5, np.nan), "images": e["images"], "states": e["states"],
               "actions": e["actions"], "coverage": np.full(len(e["actions"]), np.nan, dtype=np.float32),
               "success": True, "world": "source", "reset_seed": -1, "episode_index": e["episode_index"]}
-             for e in load_seed_episodes(CFG.seed_dataset)]
+             for e in load_seed_episodes(CFG.seed_dataset, n)]
     cache.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(cache, seeds=np.array(seeds, dtype=object))
     return seeds
@@ -94,6 +98,8 @@ def main():
     p.add_argument("--mock-verifier", action="store_true", help="CPU test without a VLM / test CPU không cần VLM")
     p.add_argument("--tiny", action="store_true", help="smoke test: tiny budgets / chạy thử với ngân sách rất nhỏ")
     p.add_argument("--vlv-url", default="http://127.0.0.1:8000/v1")
+    p.add_argument("--n-seeds", type=int, default=CFG.n_seeds,
+                   help="paper: 4; more if the collector cannot bootstrap / paper: 4; tăng nếu collector không khởi động được")
     args = p.parse_args()
 
     cfg = CFG
@@ -106,8 +112,12 @@ def main():
     log(f"arm={args.arm} gate={gate} vlv={use_vlv} device={device} iterations={args.iterations} "
         f"rollouts={args.n_rollouts}")
 
-    seeds = load_seeds(Path(args.out) / "seeds.npz")
+    seeds = load_seeds(Path(args.out) / "seeds.npz", args.n_seeds)
     data = list(seeds)
+    # Fixed seeds so arms differ only by their filter, not by initialisation luck (bug found in run 1).
+    # Cố định seed để các nhánh chỉ khác nhau ở bộ lọc, không do may rủi khi khởi tạo (lỗi phát hiện ở lần chạy 1).
+    torch.manual_seed(cfg.seed)
+    np.random.seed(cfg.seed)
     model = SuperTiny(cfg.chunk_size, cfg.d_model, cfg.n_decoder_layers, task=TASK)
 
     # Resume: reload everything accepted by finished iterations / Chạy tiếp: nạp lại mọi thứ đã chấp nhận
@@ -134,6 +144,7 @@ def main():
         (d / "accepted").mkdir(parents=True, exist_ok=True)
         steps = cfg.collector_steps_first if i == 0 else cfg.collector_steps
         log(f"iteration {i}: training collector on |D({i})|={len(data)} trajectories for {steps} steps")
+        torch.manual_seed(cfg.seed * 1000 + i)  # same shuffling/augmentation stream per iteration across arms
         losses = train_collector(model, data, steps, cfg.collector_lr, cfg.collector_batch, device, log=log)
         torch.save({k: v for k, v in model.state_dict().items() if not k.startswith("t5.")}, d / "collector.pt")
 
@@ -153,7 +164,7 @@ def main():
                     "gate_pass": t["gate_pass"], "vlv_score": t["vlv_score"], "vlv_text": t["vlv_text"],
                     "accepted": t["accepted"], **smoothness(t["actions"])}, ensure_ascii=False) + "\n")
         data += accepted
-        summary = {"iteration": i, "arm": args.arm, "collector_success_rate": float(np.mean([t["success"] for t in trajs])),
+        summary = {"iteration": i, "arm": args.arm, "n_seeds": args.n_seeds, "collector_success_rate": float(np.mean([t["success"] for t in trajs])),
                    "n_rollouts": len(trajs), "n_success": int(sum(t["success"] for t in trajs)),
                    "n_accepted": len(accepted), "dataset_trajs_after": len(data),
                    "final_collector_loss": losses[-1] if losses else None, "seconds": round(time.time() - t0)}
