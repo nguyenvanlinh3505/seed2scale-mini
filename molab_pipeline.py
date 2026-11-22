@@ -65,7 +65,14 @@ def _():
         if not PIDFILE.exists():
             return False
         try:
-            os.kill(int(PIDFILE.read_text()), 0)
+            _pid = int(PIDFILE.read_text())
+            # Reap the child if it already exited, otherwise a zombie looks "alive".
+            # Thu dọn tiến trình con nếu đã thoát, nếu không zombie trông như vẫn "sống".
+            try:
+                os.waitpid(_pid, os.WNOHANG)
+            except ChildProcessError:
+                pass
+            os.kill(_pid, 0)
             return True
         except (OSError, ValueError):
             return False
