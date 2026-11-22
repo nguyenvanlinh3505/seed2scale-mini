@@ -35,7 +35,7 @@ class Config:
     collector_batch: int = 64
 
     # --- Self-evolution / Tự tiến hóa ---
-    iterations: int = 8              # PAPER: 8 iterations in the scaling study (Fig. 4)
+    iterations: int = 8              # PAPER: 8 iterations in the scaling study (Fig. 5)
     n_rollouts: int = 256            # DEVIATION: N_rollout not reported; PushT success is rare early on
     max_steps: int = 300             # gym_pusht default episode length / độ dài mặc định
     exploration_noise: float = 0.0   # PAPER mentions no injected noise; diversity comes from random starts
@@ -50,7 +50,7 @@ class Config:
     target_steps: int = 20_000       # DEVIATION: paper trains 100k steps; 5x fewer to fit ~6 trainings
     target_lr: float = 3e-4          # PAPER: AdamW lr 3e-4
     target_batch: int = 16           # PAPER: batch size 16
-    target_iters: tuple[int, ...] = (0, 2, 4, 8)  # DEVIATION: paper trains at all 8 iterations (Fig. 4)
+    target_iters: tuple[int, ...] = (0, 2, 4, 8)  # DEVIATION: paper trains at all 8 iterations (Fig. 5)
 
     # --- Parallel worlds ---
     seen_worlds: tuple[str, ...] = ("w1", "w2", "w3", "w4", "w5")  # see s2s/worlds.py

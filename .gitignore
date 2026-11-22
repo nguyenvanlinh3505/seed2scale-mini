@@ -7,3 +7,4 @@ work/
 datasets/
 targets/
 outputs/
+*.pdf

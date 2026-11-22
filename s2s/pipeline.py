@@ -44,7 +44,7 @@ TARGETS = [
     ("gate_only_i8", "gate_only", 8, False),  # SuperTiny^- ablation: value of the VLV (Sec. IV-G)
     ("s2s_full_i8", "s2s", 8, True),     # full Seed2Scale with Parallel Worlds (Table I, unseen scenes)
     ("no_filter_i8", "no_filter", 8, False),  # no filtering at all: collapse test (not in the paper)
-    ("s2s_i4", "s2s", 4, False),         # scaling curve points (Fig. 4)
+    ("s2s_i4", "s2s", 4, False),         # scaling curve points (Fig. 5)
     ("s2s_i2", "s2s", 2, False),
 ]
 EVAL_WORLDS = ["source", *CFG.unseen_worlds]

@@ -1,10 +1,10 @@
 """Figures and tables mirroring the paper's evidence, from whatever stages have finished.
 Hình và bảng tương ứng với bằng chứng trong paper, từ những giai đoạn đã xong.
 
-  fig_collector.png  collector success per iteration and arm        (paper Fig. 6)
-  fig_scaling.png    target success vs self-evolution iteration     (paper Fig. 4)
+  fig_collector.png  collector success per iteration and arm        (paper Fig. 7)
+  fig_scaling.png    target success vs self-evolution iteration     (paper Fig. 5)
   table_targets.md   seen/unseen success for every target model      (paper Table I + Sec. IV-G)
-  table_vlv.md       what the VLV rewards: score vs smoothness/length (paper Fig. 7, Table IV)
+  table_vlv.md       what the VLV rewards: score vs smoothness/length (paper Fig. 8, Table IV)
 Usage / Cách dùng:  python -m s2s.analyze --work work
 """
 from __future__ import annotations

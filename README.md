@@ -10,7 +10,7 @@ thiết kế để chạy trên một GPU (molab, RTX Pro 6000 96 GB).
 
 ## Questions / Câu hỏi
 
-1. From **4 seed demos**, does the target model (**SmolVLA**) keep improving as self-evolution iterates? *(paper Fig. 4)*
+1. From **4 seed demos**, does the target model (**SmolVLA**) keep improving as self-evolution iterates? *(paper Fig. 5)*
    Từ **4 demo seed**, model mục tiêu (**SmolVLA**) có tiếp tục tốt lên qua các vòng tự tiến hóa không? *(Hình 4)*
 2. What does the **VLM verifier** add on top of a plain success check? *(paper Sec. IV-G, "SuperTiny⁻")*
    **VLM verifier** đóng góp gì thêm so với chỉ kiểm tra thành công? *(mục IV-G, "SuperTiny⁻")*
@@ -18,16 +18,18 @@ thiết kế để chạy trên một GPU (molab, RTX Pro 6000 96 GB).
    Không lọc gì cả thì quá trình tự học có **sụp đổ** không? *(động lực của paper; paper không làm ablation này)*
 4. Do **Parallel Worlds** (same physics, new appearance) transfer to **unseen** worlds? *(paper Table I)*
    **Parallel Worlds** (cùng vật lý, khác hình ảnh) có giúp chuyển sang thế giới **chưa thấy** không? *(Bảng I)*
-5. What does the VLV actually reward (smoothness? length?) *(paper Fig. 7, Table IV)*
+5. What does the VLV actually reward (smoothness? length?) *(paper Fig. 8, Table IV)*
    VLV thật sự thưởng cho điều gì (độ mượt? độ dài?) *(Hình 7, Bảng IV)*
 
 ## Faithfulness / Mức độ bám sát paper
 
+Checked against the arXiv v2 PDF (figure numbers follow the PDF). / Đã đối chiếu với bản PDF arXiv v2 (số hình theo bản PDF).
+
 | Component | Paper | Here / Ở đây |
 |---|---|---|
 | Seeds | 4 teleop demos at the 4 workspace corners | 4 `lerobot/pusht` demos whose T-block starts nearest each corner (found from the first frame) |
-| Collector SuperTiny | ResNet-18 + 1×1 conv, T5-small, state MLP, query decoder, K=30, temporal ensembling, 48M | same design, 51M (decoder size not reported) |
-| Verifier | success gate, then frozen **Qwen3-VL-32B** scores 0–10 with task + rollout video + seed reference video; γ fixed a priori | same; rubric and γ=7 fixed in `s2s/verifier.py` / `s2s/config.py` before any run |
+| Collector SuperTiny | ResNet-18 + 1×1 conv, T5-small, state MLP, query decoder, K=30, temporal ensembling; 48M = 12M trainable + 36M (Fig. 1), decoder width 128 (Fig. 2: "30x128"), 3 cameras | same design, 51M = 15.7M trainable + 35M frozen T5; decoder width 256 (chosen before the PDF was checked; kept so run 2 stays consistent); 1 camera (PushT has one view) |
+| Verifier | success gate, then frozen **Qwen3-VL-32B** scores 0–10 with task + rollout video + seed reference video; γ fixed a priori; outputs Result/Score/Reason (Fig. 8 shows Score 9 accepted, 3 rejected) | same; rubric and γ=7 fixed in `s2s/verifier.py` / `s2s/config.py` before any run |
 | Self-evolution | D(i+1) = D(i) ∪ D_silver(i), 8 iterations | same; N_rollout = 256 (not reported) |
 | Target | SmolVLA, "trained from scratch" per iteration, 100k steps, AdamW 3e-4, batch 16 | SmolVLA, pretrained SmolVLM2 backbone + new action expert per dataset, AdamW 3e-4, batch 16, **20k steps** (budget) |
 | Parallel Worlds | 10 worlds (some 3DGS) + 3 unseen, replay actions, feasibility check, VLV filter | 5 seen + 3 unseen **color** worlds, exact action replay (physics identical), success re-check, VLV filter |
