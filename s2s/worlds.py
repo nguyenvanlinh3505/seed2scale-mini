@@ -36,11 +36,14 @@ class WorldPushT(PushTEnv):
     """gym_pusht PushT with a configurable color scheme and a task description for LeRobot eval.
     PushT của gym_pusht với bảng màu tùy chỉnh và mô tả nhiệm vụ cho bước đánh giá của LeRobot."""
 
-    def __init__(self, world: str = "source", **kwargs):
+    def __init__(self, world: str = "source", palette: tuple | None = None, **kwargs):
+        """`palette` = (background, goal, block, agent) RGB overrides `world` (used for random variants).
+        `palette` = (nền, đích, khối T, tác tử) RGB, ghi đè `world` (dùng cho biến thể ngẫu nhiên)."""
         kwargs.setdefault("obs_type", "pixels_agent_pos")
         super().__init__(**kwargs)
-        self.world = world
-        self.bg, self.goal_color, self.block_color, self.agent_color = WORLDS[world]
+        self.world = world if palette is None else "custom"
+        colors = WORLDS[world] if palette is None else palette
+        self.bg, self.goal_color, self.block_color, self.agent_color = (tuple(int(v) for v in c) for c in colors)
 
     task = TASK  # LeRobot eval looks for `task` / `task_description` / bước đánh giá của LeRobot tìm các thuộc tính này
 
@@ -86,8 +89,8 @@ class WorldPushT(PushTEnv):
         return super().reset(options={"reset_to_state": state})
 
 
-def make_env(world: str = "source", vlv_size: int = 224) -> WorldPushT:
+def make_env(world: str = "source", vlv_size: int = 224, palette: tuple | None = None) -> WorldPushT:
     """One env. `vlv_size` sets render() resolution used for verifier videos.
     Một env. `vlv_size` là độ phân giải render() dùng cho video của verifier."""
-    return WorldPushT(world=world, render_mode="rgb_array",
+    return WorldPushT(world=world, palette=palette, render_mode="rgb_array",
                       visualization_width=vlv_size, visualization_height=vlv_size)

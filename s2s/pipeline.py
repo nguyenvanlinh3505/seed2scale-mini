@@ -72,8 +72,8 @@ def run(cmd: list[str], logfile: Path, env: dict | None = None, echo=("[", "iter
 
 
 class Work:
-    def __init__(self, root: Path, hf_repo: str | None):
-        self.root, self.hf_repo = root, hf_repo
+    def __init__(self, root: Path, hf_repo: str | None, final_step: int = CFG.target_steps):
+        self.root, self.hf_repo, self.final_step = root, hf_repo, final_step
         for d in ("state", "logs", "runs", "datasets", "targets", "results"):
             (root / d).mkdir(parents=True, exist_ok=True)
         self.token = os.environ.get("HF_TOKEN")
@@ -96,7 +96,10 @@ class Work:
         api.upload_folder(repo_id=self.hf_repo, repo_type="dataset", folder_path=str(self.root),
                           commit_message=f"stage {label}",
                           allow_patterns=["state/*", "logs/*", "runs/**", "runs_*/**", "calib/**", "results/**",
-                                          "results_*/**", "targets/*/checkpoints/last/pretrained_model/*"],
+                                          "results_*/**", "targets/*/checkpoints/last/pretrained_model/*",
+                                          # `last` is a symlink; also push the final step's real folder
+                                          # `last` là symlink; đẩy thêm thư mục thật của bước cuối
+                                          f"targets/*/checkpoints/{self.final_step:06d}/pretrained_model/*"],
                           ignore_patterns=["**/.cache/**"])
         log(f"pushed results to hf://{self.hf_repo} ({label})")
 
@@ -342,7 +345,7 @@ def main():
     p.add_argument("--min-success", type=float, default=0.03,
                    help="iteration-0 collector success needed to bootstrap (paper: early success < 15%%, non-zero)")
     a = p.parse_args()
-    w = Work(Path(a.work).resolve(), a.hf_repo)
+    w = Work(Path(a.work).resolve(), a.hf_repo, a.target_steps)
     w.pull()
     vllm_python = w.root / ".venv-vllm" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
     stages = a.stages.split(",")
