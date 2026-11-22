@@ -308,7 +308,15 @@ def stage_targets(w: Work, steps: int, only: list[str] | None, n_seeds: int):
         if run(cmd, L) != 0:
             log(f"skip {name}: export failed (stage not finished?)")
             continue
-        if not (out / "checkpoints" / "last").exists():
+        # Done only if the FINAL step's checkpoint exists; a run killed after an intermediate save leaves
+        # checkpoints/last pointing at a partial model, so it is wiped and retrained.
+        # Chỉ coi là xong khi có checkpoint ở bước CUỐI; lần train bị dừng sau một lần lưu giữa chừng để lại
+        # checkpoints/last trỏ vào model dở dang, nên xóa và train lại.
+        if not (out / "checkpoints" / f"{steps:06d}").exists():
+            if out.exists():
+                import shutil
+                log(f"{name}: removing partial training run {out}")
+                shutil.rmtree(out)
             if run([PY, "-m", "s2s.train_target", "--dataset", str(ds), "--out", str(out), "--steps", str(steps)], L) != 0:
                 raise SystemExit(f"training {name} failed")
         ckpt = out / "checkpoints" / "last" / "pretrained_model"
